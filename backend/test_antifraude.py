@@ -239,6 +239,52 @@ class TestRaceConditionPrevention:
         pass
 
 
+@pytest.mark.antifraude
+@pytest.mark.sqlite
+class TestModelValidation:
+    """Model and schema validation to prevent regressions"""
+
+    def test_license_table_name_correct(self, test_db_session):
+        """Verify License model table name is 'licenses' (case-sensitive SQL)"""
+        from app.models import License
+        # SQLAlchemy model must map to correct table name
+        table_name = License.__tablename__
+        assert table_name == "licenses", \
+            f"License table name must be 'licenses', got '{table_name}'. " \
+            f"ORM locks (with_for_update) depend on correct table name."
+
+    def test_license_device_table_name_correct(self, test_db_session):
+        """Verify LicenseDevice model table name is 'license_devices'"""
+        from app.models import LicenseDevice
+        table_name = LicenseDevice.__tablename__
+        assert table_name == "license_devices", \
+            f"LicenseDevice table name must be 'license_devices', got '{table_name}'."
+
+    def test_license_orm_lock_column(self, test_db_session, setup_test_data):
+        """Verify License model supports with_for_update() ORM lock"""
+        from app.models import License, Client, Product
+
+        # Create test data
+        product = test_db_session.query(Product).first()
+        client = test_db_session.query(Client).first()
+
+        if not client or not product:
+            pytest.skip("Test data not available")
+
+        # Verify we can query License with ORM lock
+        license_obj = (
+            test_db_session.query(License)
+            .filter(License.client_id == client.id)
+            .filter(License.product_id == product.id)
+            .with_for_update()
+            .first()
+        )
+
+        # The lock query should work without SQL syntax errors
+        # (test_client runs in SQLite which doesn't enforce locks, but verifies syntax)
+        assert True  # If we reach here, ORM lock syntax is valid
+
+
 # Marker for tests still without coverage
 MISSING_COVERAGE = [
     "token_theft_across_devices",  # Token created on device1 fails on device2

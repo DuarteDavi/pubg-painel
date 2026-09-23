@@ -110,11 +110,13 @@ async def login(request_data: LoginRequest, request: Request, db: Session = Depe
         device_id = str(existing_device.id)
     else:
         # New device - check limit with transaction isolation
-        # Use SELECT FOR UPDATE to lock the row and prevent race conditions
-        from sqlalchemy import text
-
-        # Lock the license row to prevent concurrent modifications
-        db.execute(text(f"SELECT 1 FROM License WHERE id = :license_id FOR UPDATE"), {"license_id": license_obj.id})
+        # Use FOR UPDATE to lock the row and prevent race conditions
+        license_obj = (
+            db.query(License)
+            .filter(License.id == license_obj.id)
+            .with_for_update()
+            .one()
+        )
 
         # Recount after lock to ensure accuracy (device could have been added between check and lock)
         device_count = db.query(LicenseDevice).filter(
