@@ -55,3 +55,6 @@ dist/
 
 # Local generated credential material
 backend/hash.txt
+
+# Claude Code local settings (contains local machine paths and credentials)
+.claude/
