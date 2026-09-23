@@ -60,11 +60,15 @@ class TestAdminFlow:
         assert response.status_code == 401
         assert "INVALID_CREDENTIALS" in response.text
 
+    def _get_headers(self, token):
+        """Helper to create Bearer token header"""
+        return {"Authorization": f"Bearer {token}"}
+
     def test_03_dashboard_stats(self, admin_token):
         """Test dashboard statistics endpoint"""
         response = requests.get(
             f"{API_PREFIX}/admin/dashboard",
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
         data = response.json()
@@ -83,7 +87,7 @@ class TestAdminFlow:
                 "device_limit": 2,
                 "license_days": 30
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 201
         data = response.json()
@@ -102,7 +106,7 @@ class TestAdminFlow:
                 "device_limit": 1,
                 "license_days": 30
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
 
         # Try duplicate
@@ -115,7 +119,7 @@ class TestAdminFlow:
                 "device_limit": 1,
                 "license_days": 30
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 400
 
@@ -124,10 +128,10 @@ class TestAdminFlow:
         response = requests.get(
             f"{API_PREFIX}/admin/clients",
             params={
-                "token": admin_token,
                 "page": 1,
                 "page_size": 10
-            }
+            },
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
         data = response.json()
@@ -145,14 +149,14 @@ class TestAdminFlow:
                 "device_limit": 3,
                 "license_days": 60
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         client_id = create_resp.json()["id"]
 
         # Get details
         response = requests.get(
             f"{API_PREFIX}/admin/clients/{client_id}",
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
         data = response.json()
@@ -171,14 +175,14 @@ class TestAdminFlow:
                 "device_limit": 1,
                 "license_days": 30
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         client_id = create_resp.json()["id"]
 
         # Deactivate
         response = requests.post(
             f"{API_PREFIX}/admin/clients/{client_id}/deactivate",
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
         assert response.json()["status"] == "inactive"
@@ -186,7 +190,7 @@ class TestAdminFlow:
         # Activate
         response = requests.post(
             f"{API_PREFIX}/admin/clients/{client_id}/activate",
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
         assert response.json()["status"] == "active"
@@ -203,7 +207,7 @@ class TestAdminFlow:
                 "device_limit": 1,
                 "license_days": 30
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         client_id = create_resp.json()["id"]
 
@@ -211,7 +215,7 @@ class TestAdminFlow:
         response = requests.post(
             f"{API_PREFIX}/admin/clients/{client_id}/reset-password",
             json={"new_password": "NewPass@2026"},
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
 
@@ -227,7 +231,7 @@ class TestAdminFlow:
                 "device_limit": 1,
                 "license_days": 1
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         client_id = create_resp.json()["id"]
 
@@ -235,7 +239,7 @@ class TestAdminFlow:
         response = requests.post(
             f"{API_PREFIX}/admin/clients/{client_id}/renew-license",
             json={"days": 30},
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
         data = response.json()
@@ -253,14 +257,14 @@ class TestAdminFlow:
                 "device_limit": 3,
                 "license_days": 30
             },
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         client_id = create_resp.json()["id"]
 
         # List devices (should be empty)
         response = requests.get(
             f"{API_PREFIX}/admin/clients/{client_id}/devices",
-            params={"token": admin_token}
+            headers=self._get_headers(admin_token)
         )
         assert response.status_code == 200
         devices = response.json()

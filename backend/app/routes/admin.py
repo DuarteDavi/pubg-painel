@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 from datetime import datetime, timedelta, timezone
@@ -24,9 +24,22 @@ from app.utils import (
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-def verify_admin_token(token: str, db: Session = Depends(get_db)) -> dict:
+def get_bearer_token(authorization: str = Header(None)) -> str:
     """
-    Dependency: Verify admin token is valid.
+    Extract Bearer token from Authorization header.
+    """
+    if not authorization:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="MISSING_BEARER_TOKEN")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_BEARER_FORMAT")
+
+    return authorization[7:]  # Remove "Bearer " prefix
+
+
+def verify_admin_token(token: str = Depends(get_bearer_token), db: Session = Depends(get_db)) -> dict:
+    """
+    Dependency: Verify admin token is valid from Authorization header.
     BACKEND VALIDATION: Always check token in database.
     """
     payload = verify_token(token)
@@ -101,16 +114,17 @@ async def admin_login(request_data: AdminLoginRequest, request: Request, db: Ses
 
 
 @router.post("/logout")
-async def admin_logout(token: str, db: Session = Depends(get_db)):
+async def admin_logout(token: str = Depends(get_bearer_token), db: Session = Depends(get_db)):
     """
     Admin logout.
+    Extracts Bearer token from Authorization header.
     """
     revoke_admin_session(hash_token(token), db)
     return {"message": "Logged out"}
 
 
 @router.get("/dashboard", response_model=DashboardStats)
-async def get_dashboard(token: str, db: Session = Depends(get_db), _=Depends(verify_admin_token)):
+async def get_dashboard(db: Session = Depends(get_db), _=Depends(verify_admin_token)):
     """
     Get dashboard statistics.
     """
@@ -145,7 +159,6 @@ async def get_dashboard(token: str, db: Session = Depends(get_db), _=Depends(ver
 
 @router.get("/clients", response_model=ClientListResponse)
 async def list_clients(
-    token: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     search: str = Query(""),
@@ -208,7 +221,6 @@ async def list_clients(
 @router.post("/clients", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
 async def create_client(
     client_data: ClientCreate,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -277,7 +289,6 @@ async def create_client(
 @router.get("/clients/{client_id}", response_model=ClientResponse)
 async def get_client(
     client_id: int,
-    token: str,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
 ):
@@ -312,7 +323,6 @@ async def get_client(
 async def update_client(
     client_id: int,
     update_data: ClientUpdate,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -365,7 +375,6 @@ async def update_client(
 async def reset_client_password(
     client_id: int,
     new_password: str,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -397,7 +406,6 @@ async def reset_client_password(
 @router.post("/clients/{client_id}/revoke-sessions")
 async def revoke_client_sessions(
     client_id: int,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -432,7 +440,6 @@ async def revoke_client_sessions(
 async def renew_license(
     client_id: int,
     days: int,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -467,7 +474,6 @@ async def renew_license(
 @router.post("/clients/{client_id}/activate")
 async def activate_client(
     client_id: int,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -499,7 +505,6 @@ async def activate_client(
 @router.post("/clients/{client_id}/deactivate")
 async def deactivate_client(
     client_id: int,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -531,7 +536,6 @@ async def deactivate_client(
 @router.delete("/clients/{client_id}")
 async def delete_client(
     client_id: int,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
@@ -564,7 +568,6 @@ async def delete_client(
 @router.get("/clients/{client_id}/devices", response_model=list)
 async def get_client_devices(
     client_id: int,
-    token: str,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),
 ):
@@ -589,7 +592,6 @@ async def get_client_devices(
 async def remove_device(
     client_id: int,
     device_id: int,
-    token: str,
     request: Request,
     db: Session = Depends(get_db),
     _=Depends(verify_admin_token),

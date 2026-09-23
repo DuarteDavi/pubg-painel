@@ -116,6 +116,10 @@ class TokenResponse(BaseModel):
     expires_at: datetime
 
 
+class VerifyRequest(BaseModel):
+    device_hash: str
+
+
 class VerifyResponse(BaseModel):
     valid: bool
     login: str

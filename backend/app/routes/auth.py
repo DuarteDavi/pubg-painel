@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from datetime import datetime, timezone
 from app.database import get_db
-from app.schemas import LoginRequest, LoginResponse, VerifyResponse, TokenResponse, RefreshTokenRequest
+from app.schemas import LoginRequest, LoginResponse, VerifyResponse, TokenResponse, RefreshTokenRequest, VerifyRequest
 from app.models import Client, License, LicenseDevice, ClientSession, Product, ClientStatus
 from app.auth import (
     verify_password, hash_password, create_access_token, create_refresh_token,
@@ -109,7 +109,14 @@ async def login(request_data: LoginRequest, request: Request, db: Session = Depe
         existing_device.last_ip = ip_address
         device_id = str(existing_device.id)
     else:
-        # New device - check limit with transaction lock
+        # New device - check limit with transaction isolation
+        # Use SELECT FOR UPDATE to lock the row and prevent race conditions
+        from sqlalchemy import text
+
+        # Lock the license row to prevent concurrent modifications
+        db.execute(text(f"SELECT 1 FROM License WHERE id = :license_id FOR UPDATE"), {"license_id": license_obj.id})
+
+        # Recount after lock to ensure accuracy (device could have been added between check and lock)
         device_count = db.query(LicenseDevice).filter(
             LicenseDevice.license_id == license_obj.id
         ).count()
@@ -123,7 +130,7 @@ async def login(request_data: LoginRequest, request: Request, db: Session = Depe
             )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="DEVICE_LIMIT_REACHED")
 
-        # Create new device
+        # Create new device within the lock
         new_device = LicenseDevice(
             license_id=license_obj.id,
             client_id=client.id,
@@ -174,28 +181,56 @@ async def login(request_data: LoginRequest, request: Request, db: Session = Depe
 
 
 @router.post("/verify", response_model=VerifyResponse)
-async def verify_session(token: str, request: Request, db: Session = Depends(get_db)):
+async def verify_session(verify_req: VerifyRequest, request: Request, db: Session = Depends(get_db)):
     """
-    Verify client session validity.
-    BACKEND VALIDATION: Check everything - token, client, license, device.
+    Verify client session validity with device binding.
+    BACKEND VALIDATION: Check everything - token, client, license, device binding.
+    Extracts Bearer token from Authorization header.
+    Device hash must match the device that created the session (device vínculo).
+    Rate limited to prevent token enumeration attacks.
     """
     ip_address = get_client_ip(request)
+    rate_limit_key = f"verify_{ip_address}"
+
+    # Rate limiting on IP to prevent brute force
+    if is_rate_limited(rate_limit_key):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="RATE_LIMITED")
+
+    # Extract Bearer token from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        record_login_attempt(rate_limit_key)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="MISSING_BEARER_TOKEN")
+
+    token = auth_header[7:]  # Remove "Bearer " prefix
 
     # Decode token
     payload = verify_token(token)
     if not payload:
+        record_login_attempt(rate_limit_key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SESSION_REVOKED")
 
     client_id = payload.get("client_id")
     client = db.query(Client).filter(Client.id == client_id).first()
 
     if not client or client.status != ClientStatus.ACTIVE:
+        record_login_attempt(rate_limit_key)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="LICENSE_DISABLED")
 
     # Validate session in database
     session_data = verify_client_session(hash_token(token), db)
     if not session_data:
+        record_login_attempt(rate_limit_key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SESSION_REVOKED")
+
+    # DEVICE VÍNCULO: Validate device hash matches session device (prevent token theft on other machines)
+    if session_data.get("device_hash") != verify_req.device_hash:
+        record_audit_log(
+            db, AuditAction.CLIENT_LOGIN_FAILED, client_id=client.id,
+            details=f"Device mismatch: expected {session_data.get('device_hash')}, got {verify_req.device_hash}",
+            ip_address=ip_address, success=False
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="DEVICE_MISMATCH")
 
     # Validate license
     license_obj = db.query(License).filter(
@@ -261,10 +296,18 @@ async def refresh_access(request_data: RefreshTokenRequest, request: Request, db
 
 
 @router.post("/logout")
-async def logout(token: str, db: Session = Depends(get_db)):
+async def logout(request: Request, db: Session = Depends(get_db)):
     """
     Revoke client session.
+    Extracts Bearer token from Authorization header.
     """
+    # Extract Bearer token from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="MISSING_BEARER_TOKEN")
+
+    token = auth_header[7:]  # Remove "Bearer " prefix
+
     from app.utils import revoke_client_session
     revoke_client_session(hash_token(token), db)
     return {"message": "Logged out"}
