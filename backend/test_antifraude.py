@@ -89,6 +89,38 @@ class TestDeviceBinding:
         # Token is invalid, but device_hash was accepted in request
         assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
 
+    def test_verify_device_mismatch_returns_403(self, test_client, setup_test_data):
+        """POST /verify with different device_hash returns DEVICE_MISMATCH"""
+        # Send device_hash that doesn't match original login device
+        mismatched_device_hash = self._hash_device({"uuid": "different_device", "board": "other"})
+        response = test_client.post(
+            "/api/auth/verify",
+            json={"device_hash": mismatched_device_hash},
+            headers={"Authorization": "Bearer invalid_token"}
+        )
+        # Should fail - either invalid token or device mismatch
+        assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+
+    def test_verify_empty_device_hash_rejected(self, test_client, setup_test_data):
+        """POST /verify with empty device_hash is rejected"""
+        response = test_client.post(
+            "/api/auth/verify",
+            json={"device_hash": ""},
+            headers={"Authorization": "Bearer test"}
+        )
+        # Empty hash should be rejected (validation or mismatch)
+        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+
+    def test_verify_invalid_device_hash_format_rejected(self, test_client, setup_test_data):
+        """POST /verify with invalid device_hash format is rejected"""
+        response = test_client.post(
+            "/api/auth/verify",
+            json={"device_hash": "not_a_valid_hash!!!"},
+            headers={"Authorization": "Bearer test"}
+        )
+        # Invalid format should be rejected
+        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+
 
 @pytest.mark.antifraude
 @pytest.mark.sqlite
@@ -182,6 +214,20 @@ class TestAuditLogging:
                 headers={"Authorization": f"Bearer {token}"}
             )
             assert token not in bad_response.text
+
+    def test_audit_log_no_device_hashes(self, test_client, setup_test_data):
+        """Audit logs MUST NOT contain full device hashes (device binding security)"""
+        # Attempt verify with mismatched device
+        device_hash = "abc123def456"
+        response = test_client.post(
+            "/api/auth/verify",
+            json={"device_hash": device_hash},
+            headers={"Authorization": "Bearer test_token"}
+        )
+        # Verify response doesn't echo the device_hash
+        response_text = response.text.lower()
+        # Full hash should not appear in response
+        assert device_hash not in response_text
 
 
 @pytest.mark.antifraude

@@ -226,10 +226,15 @@ async def verify_session(verify_req: VerifyRequest, request: Request, db: Sessio
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SESSION_REVOKED")
 
     # DEVICE VÍNCULO: Validate device hash matches session device (prevent token theft on other machines)
-    if session_data.get("device_hash") != verify_req.device_hash:
+    # Calculate fingerprint using same method as login
+    verification_device_hash = hash_device({
+        "machine_guid_hash": verify_req.device_hash,
+    })
+
+    if session_data.get("device_hash") != verification_device_hash:
         record_audit_log(
             db, AuditAction.CLIENT_LOGIN_FAILED, client_id=client.id,
-            details=f"Device mismatch: expected {session_data.get('device_hash')}, got {verify_req.device_hash}",
+            details="Device mismatch during session verification",
             ip_address=ip_address, success=False
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="DEVICE_MISMATCH")
