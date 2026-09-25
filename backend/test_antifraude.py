@@ -18,29 +18,33 @@ class TestBearerTokenAuthentication:
 
     def test_login_requires_bearer_token_in_verify(self, test_client, setup_test_data):
         """POST /auth/verify REQUIRES Bearer token in Authorization header"""
+        # Valid SHA256 hash for this test
+        valid_hash = hashlib.sha256(b"test").hexdigest()
         # Test 1: No header at all
         response = test_client.post(
             "/api/auth/verify",
-            json={"device_hash": "test_hash"}
+            json={"device_hash": valid_hash}
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         assert "MISSING_BEARER_TOKEN" in response.text or "Authorization" in response.text
 
     def test_login_rejects_query_param_token(self, test_client, setup_test_data):
         """POST /auth/verify REJECTS token in query params (security hardening)"""
+        valid_hash = hashlib.sha256(b"test").hexdigest()
         response = test_client.post(
             "/api/auth/verify?token=test_token",
-            json={"device_hash": "test_hash"}
+            json={"device_hash": valid_hash}
         )
         # Should fail because no Bearer header
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     def test_bearer_token_format_invalid(self, test_client, setup_test_data):
         """POST /auth/verify REJECTS malformed Bearer tokens"""
+        valid_hash = hashlib.sha256(b"test").hexdigest()
         # Missing "Bearer " prefix
         response = test_client.post(
             "/api/auth/verify",
-            json={"device_hash": "test_hash"},
+            json={"device_hash": valid_hash},
             headers={"Authorization": "InvalidToken"}
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -48,9 +52,10 @@ class TestBearerTokenAuthentication:
 
     def test_bearer_token_empty_prefix(self, test_client, setup_test_data):
         """POST /auth/verify REJECTS 'Bearer ' with no token"""
+        valid_hash = hashlib.sha256(b"test").hexdigest()
         response = test_client.post(
             "/api/auth/verify",
-            json={"device_hash": "test_hash"},
+            json={"device_hash": valid_hash},
             headers={"Authorization": "Bearer "}
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -108,8 +113,13 @@ class TestDeviceBinding:
             json={"device_hash": ""},
             headers={"Authorization": "Bearer test"}
         )
-        # Empty hash should be rejected (validation or mismatch)
-        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+        # Empty hash should be rejected during validation (422) or endpoint (400/401/403)
+        assert response.status_code in [
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        ]
 
     def test_verify_invalid_device_hash_format_rejected(self, test_client, setup_test_data):
         """POST /verify with invalid device_hash format is rejected"""
@@ -118,8 +128,13 @@ class TestDeviceBinding:
             json={"device_hash": "not_a_valid_hash!!!"},
             headers={"Authorization": "Bearer test"}
         )
-        # Invalid format should be rejected
-        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+        # Invalid format should be rejected during validation (422) or endpoint (400/401/403)
+        assert response.status_code in [
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        ]
 
 
 @pytest.mark.antifraude
@@ -161,11 +176,12 @@ class TestRateLimiting:
 
     def test_verify_endpoint_rate_limited(self, test_client, reset_rate_limiter):
         """POST /auth/verify is rate limited by IP"""
+        valid_hash = hashlib.sha256(b"test").hexdigest()
         # Make 5 verify attempts (should all fail for other reasons, but not rate limit yet)
         for i in range(5):
             response = test_client.post(
                 "/api/auth/verify",
-                json={"device_hash": "test"},
+                json={"device_hash": valid_hash},
                 headers={"Authorization": "Bearer test"}
             )
             # Not rate limited yet
@@ -174,7 +190,7 @@ class TestRateLimiting:
         # 6th attempt should be rate limited
         response = test_client.post(
             "/api/auth/verify",
-            json={"device_hash": "test"},
+            json={"device_hash": valid_hash},
             headers={"Authorization": "Bearer test"}
         )
         assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
@@ -217,14 +233,14 @@ class TestAuditLogging:
 
     def test_audit_log_no_device_hashes(self, test_client, setup_test_data):
         """Audit logs MUST NOT contain full device hashes (device binding security)"""
-        # Attempt verify with mismatched device
-        device_hash = "abc123def456"
+        # Attempt verify with valid format but wrong device
+        device_hash = hashlib.sha256(b"test_device").hexdigest()
         response = test_client.post(
             "/api/auth/verify",
             json={"device_hash": device_hash},
             headers={"Authorization": "Bearer test_token"}
         )
-        # Verify response doesn't echo the device_hash
+        # Verify response doesn't echo the device_hash in details
         response_text = response.text.lower()
         # Full hash should not appear in response
         assert device_hash not in response_text
@@ -261,8 +277,13 @@ class TestInputValidation:
             json={"device_hash": ""},  # Empty hash
             headers={"Authorization": "Bearer test"}
         )
-        # Empty device hash should be rejected
-        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
+        # Empty device hash should be rejected during validation (422) or endpoint (400/401/403)
+        assert response.status_code in [
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        ]
 
 
 @pytest.mark.antifraude

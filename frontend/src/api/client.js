@@ -53,10 +53,10 @@ export const adminAPI = {
   getClient: (clientId, token) =>
     apiClient.get(`/api/admin/clients/${clientId}`, { params: { token } }),
 
-  createClient: (login, password, passwordConfirm, deviceLimit, licenseDays, token) =>
+  createClient: (login, password, passwordConfirm, deviceLimit, licenseDays, product, token) =>
     apiClient.post(
       '/api/admin/clients',
-      { login, password, password_confirm: passwordConfirm, device_limit: deviceLimit, license_days: licenseDays },
+      { login, password, password_confirm: passwordConfirm, device_limit: deviceLimit, license_days: licenseDays, product },
       { params: { token } }
     ),
 

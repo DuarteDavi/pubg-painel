@@ -30,6 +30,7 @@ class ClientCreate(BaseModel):
     login: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=8)
     password_confirm: str = Field(..., min_length=8)
+    product: str = Field(default="survival_macro")
     device_limit: int = Field(default=1, ge=1, le=10)
     license_days: int = Field(default=30, ge=1, le=365)
 
@@ -38,6 +39,13 @@ class ClientCreate(BaseModel):
     def validate_login(cls, v):
         if not v.isalnum():
             raise ValueError("Login must contain only alphanumeric characters")
+        return v
+
+    @field_validator("product")
+    @classmethod
+    def validate_product(cls, v):
+        if v not in ("survival_macro", "survival_vision"):
+            raise ValueError("Product must be 'survival_macro' or 'survival_vision'")
         return v
 
     @field_validator("password_confirm")
@@ -61,6 +69,7 @@ class ClientResponse(ClientBase):
     devices_count: Optional[int] = None
     license_expires_at: Optional[datetime] = None
     days_until_expiry: Optional[int] = None
+    product: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -117,7 +126,32 @@ class TokenResponse(BaseModel):
 
 
 class VerifyRequest(BaseModel):
-    device_hash: str
+    device_hash: dict | str
+
+    @field_validator("device_hash", mode="before")
+    @classmethod
+    def validate_device_hash(cls, v):
+        if isinstance(v, str):
+            if len(v) != 64 or not all(c in "0123456789abcdef" for c in v.lower()):
+                raise ValueError("Device hash must be valid SHA-256 hexadecimal (64 chars)")
+        elif isinstance(v, dict):
+            expected_keys = {
+                "system_uuid_hash",
+                "baseboard_serial_hash",
+                "machine_guid_hash",
+                "install_id_hash",
+                "disk_serial_hash",
+            }
+            if set(v.keys()) != expected_keys:
+                raise ValueError(
+                    f"Device hash dict must contain exactly these keys: {expected_keys}"
+                )
+            for key, val in v.items():
+                if not isinstance(val, str) or not val:
+                    raise ValueError(f"Device hash {key} must be non-empty string")
+        else:
+            raise ValueError("Device hash must be string or dict")
+        return v
 
 
 class VerifyResponse(BaseModel):

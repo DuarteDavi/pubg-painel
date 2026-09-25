@@ -20,6 +20,7 @@ function ClientList() {
     login: '',
     password: '',
     passwordConfirm: '',
+    product: 'survival_macro',
     deviceLimit: 1,
     licenseDays: 30,
   })
@@ -54,12 +55,14 @@ function ClientList() {
         formData.passwordConfirm,
         formData.deviceLimit,
         formData.licenseDays,
+        formData.product,
         token
       )
       setFormData({
         login: '',
         password: '',
         passwordConfirm: '',
+        product: 'survival_macro',
         deviceLimit: 1,
         licenseDays: 30,
       })
@@ -135,6 +138,7 @@ function ClientList() {
               <thead>
                 <tr>
                   <th>Login</th>
+                  <th>Product</th>
                   <th>Status</th>
                   <th>Devices</th>
                   <th>License Expires</th>
@@ -147,6 +151,7 @@ function ClientList() {
                 {clients.map((client) => (
                   <tr key={client.id}>
                     <td>{client.login}</td>
+                    <td>{client.product || 'N/A'}</td>
                     <td>
                       <span
                         style={{
@@ -238,6 +243,20 @@ function ClientList() {
               maxLength="50"
               style={styles.formInput}
             />
+          </div>
+
+          <div style={styles.formGroup}>
+            <label>Product</label>
+            <select
+              value={formData.product}
+              onChange={(e) =>
+                setFormData({ ...formData, product: e.target.value })
+              }
+              style={styles.formInput}
+            >
+              <option value="survival_macro">Survival Macro</option>
+              <option value="survival_vision">Survival Vision</option>
+            </select>
           </div>
 
           <div style={styles.formGroup}>

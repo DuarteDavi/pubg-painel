@@ -128,6 +128,11 @@ function ClientDetail() {
 
         <div style={styles.infoGrid}>
           <div style={styles.infoItem}>
+            <label>Product</label>
+            <span>{client.product || 'N/A'}</span>
+          </div>
+
+          <div style={styles.infoItem}>
             <label>Status</label>
             <span
               style={{

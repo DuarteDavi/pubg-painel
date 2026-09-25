@@ -192,12 +192,15 @@ async def list_clients(
         devices_count = db.query(LicenseDevice).filter(LicenseDevice.client_id == client.id).count()
 
         days_remaining = None
+        product_name = None
         if license_obj:
             # Ensure both datetimes are timezone-aware
             expires_at = license_obj.expires_at
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
             days_remaining = (expires_at - now).days if expires_at > now else -1
+            product = db.query(Product).filter(Product.id == license_obj.product_id).first()
+            product_name = product.name if product else None
 
         items.append(ClientResponse(
             id=client.id,
@@ -208,6 +211,7 @@ async def list_clients(
             devices_count=devices_count,
             license_expires_at=license_obj.expires_at if license_obj else None,
             days_until_expiry=days_remaining,
+            product=product_name,
         ))
 
     return ClientListResponse(
@@ -235,6 +239,11 @@ async def create_client(
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Login already exists")
 
+    # Get product
+    product = db.query(Product).filter(Product.name == client_data.product).first()
+    if not product:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Product '{client_data.product}' not found")
+
     # Create client
     client = Client(
         login=client_data.login,
@@ -243,13 +252,6 @@ async def create_client(
     )
     db.add(client)
     db.flush()
-
-    # Get or create product
-    product = db.query(Product).filter(Product.name == "survival_macro").first()
-    if not product:
-        product = Product(name="survival_macro", description="Survival Macro - Access Control")
-        db.add(product)
-        db.flush()
 
     # Create license
     now = get_current_timestamp_utc()
@@ -272,7 +274,7 @@ async def create_client(
         client_id=client.id,
         resource_type="client",
         resource_id=str(client.id),
-        details=f"Login: {client.login}, Limit: {client_data.device_limit}, Days: {client_data.license_days}",
+        details=f"Login: {client.login}, Product: {client_data.product}, Limit: {client_data.device_limit}, Days: {client_data.license_days}",
         ip_address=ip_address,
         success=True,
     )
@@ -283,6 +285,7 @@ async def create_client(
         status=client.status,
         created_at=client.created_at,
         last_login_at=client.last_login_at,
+        product=client_data.product,
     )
 
 
@@ -303,9 +306,12 @@ async def get_client(
     devices_count = db.query(LicenseDevice).filter(LicenseDevice.client_id == client.id).count()
 
     days_remaining = None
+    product_name = None
     if license_obj:
         now = get_current_timestamp_utc()
         days_remaining = (license_obj.expires_at - now).days if license_obj.expires_at > now else -1
+        product = db.query(Product).filter(Product.id == license_obj.product_id).first()
+        product_name = product.name if product else None
 
     return ClientResponse(
         id=client.id,
@@ -316,6 +322,7 @@ async def get_client(
         devices_count=devices_count,
         license_expires_at=license_obj.expires_at if license_obj else None,
         days_until_expiry=days_remaining,
+        product=product_name,
     )
 
 
@@ -352,6 +359,12 @@ async def update_client(
 
     db.commit()
 
+    license_obj = db.query(License).filter(License.client_id == client.id).first()
+    product_name = None
+    if license_obj:
+        product = db.query(Product).filter(Product.id == license_obj.product_id).first()
+        product_name = product.name if product else None
+
     record_audit_log(
         db, AuditAction.CLIENT_CREATED,
         client_id=client.id,
@@ -368,6 +381,7 @@ async def update_client(
         status=client.status,
         created_at=client.created_at,
         last_login_at=client.last_login_at,
+        product=product_name,
     )
 
 

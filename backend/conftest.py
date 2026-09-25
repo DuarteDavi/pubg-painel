@@ -99,6 +99,12 @@ def test_client(test_app):
 
 
 @pytest.fixture(scope="function")
+def db(test_db_session):
+    """Direct database session access for tests"""
+    yield test_db_session
+
+
+@pytest.fixture(scope="function")
 def setup_test_data(test_db_session, test_app):
     """Setup initial test data"""
     # Create product (required by endpoints)
@@ -107,6 +113,20 @@ def setup_test_data(test_db_session, test_app):
         description="Test Product"
     )
     test_db_session.add(product)
+    test_db_session.commit()
+
+    yield test_db_session
+
+
+@pytest.fixture(scope="function")
+def setup_dual_products(test_db_session):
+    """Setup both products for dual-product tests"""
+    products = [
+        Product(name="survival_macro", description="Spray Control - Survival Macro Access Control"),
+        Product(name="survival_vision", description="Vision - Survival Vision Access Control"),
+    ]
+    for product in products:
+        test_db_session.add(product)
     test_db_session.commit()
 
     yield test_db_session

@@ -36,26 +36,30 @@ logger.info("[CORS] CORSMiddleware registered")
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# Seed product
-def seed_product():
+# Seed products (idempotent)
+def seed_products():
     db = SessionLocal()
     try:
-        existing = db.query(Product).filter(Product.name == "survival_macro").first()
-        if not existing:
-            product = Product(
-                name="survival_macro",
-                description="Spray Control - Survival Macro Access Control"
-            )
-            db.add(product)
-            db.commit()
-            logger.info("Product 'survival_macro' created")
+        products = [
+            ("survival_macro", "Spray Control - Survival Macro Access Control"),
+            ("survival_vision", "Vision - Survival Vision Access Control"),
+        ]
+        for name, description in products:
+            existing = db.query(Product).filter(Product.name == name).first()
+            if not existing:
+                product = Product(name=name, description=description)
+                db.add(product)
+                db.commit()
+                logger.info(f"Product '{name}' created")
+            else:
+                logger.info(f"Product '{name}' already exists")
     except Exception as e:
-        logger.error(f"Error seeding product: {e}")
+        logger.error(f"Error seeding products: {e}")
         db.rollback()
     finally:
         db.close()
 
-seed_product()
+seed_products()
 
 # Validate admin configuration
 def validate_admin_config():

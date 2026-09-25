@@ -76,7 +76,10 @@ async def login(request_data: LoginRequest, request: Request, db: Session = Depe
 
     # Validate license expiry
     now = get_current_timestamp_utc()
-    if license_obj.expires_at < now:
+    expires_at = license_obj.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now:
         record_audit_log(
             db, AuditAction.CLIENT_LOGIN_FAILED, client_id=client.id,
             details="License expired", ip_address=ip_address, success=False
@@ -226,12 +229,32 @@ async def verify_session(verify_req: VerifyRequest, request: Request, db: Sessio
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="SESSION_REVOKED")
 
     # DEVICE VÍNCULO: Validate device hash matches session device (prevent token theft on other machines)
-    # Calculate fingerprint using same method as login
-    verification_device_hash = hash_device({
-        "machine_guid_hash": verify_req.device_hash,
-    })
+    # Handle both formats: Vision sends dict (5 component hashes), Macro Simple sends string (final hash)
+    if isinstance(verify_req.device_hash, dict):
+        # Vision format: dict of component hashes - apply hash_device() to normalize
+        normalized_device_hash = hash_device(verify_req.device_hash)
+    else:
+        # Macro Simple format: string (SHA256 final) - pass through hash_device for consistency
+        if not isinstance(verify_req.device_hash, str) or len(verify_req.device_hash) != 64:
+            record_audit_log(
+                db, AuditAction.CLIENT_LOGIN_FAILED, client_id=client.id,
+                details="Invalid device hash format",
+                ip_address=ip_address, success=False
+            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="DEVICE_MISMATCH")
+        normalized_device_hash = hash_device({
+            "machine_guid_hash": verify_req.device_hash,
+        })
 
-    if session_data.get("device_hash") != verification_device_hash:
+    if not normalized_device_hash:
+        record_audit_log(
+            db, AuditAction.CLIENT_LOGIN_FAILED, client_id=client.id,
+            details="Device hash normalization failed",
+            ip_address=ip_address, success=False
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="DEVICE_MISMATCH")
+
+    if session_data.get("device_hash") != normalized_device_hash:
         record_audit_log(
             db, AuditAction.CLIENT_LOGIN_FAILED, client_id=client.id,
             details="Device mismatch during session verification",
@@ -248,7 +271,10 @@ async def verify_session(verify_req: VerifyRequest, request: Request, db: Sessio
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="LICENSE_DISABLED")
 
     now = get_current_timestamp_utc()
-    if license_obj.expires_at < now:
+    expires_at = license_obj.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="LICENSE_EXPIRED")
 
     return VerifyResponse(
