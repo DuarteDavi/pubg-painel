@@ -146,9 +146,16 @@ class VerifyRequest(BaseModel):
                 raise ValueError(
                     f"Device hash dict must contain exactly these keys: {expected_keys}"
                 )
+            non_empty_count = 0
             for key, val in v.items():
-                if not isinstance(val, str) or not val:
-                    raise ValueError(f"Device hash {key} must be non-empty string")
+                if not isinstance(val, str):
+                    raise ValueError(f"Device hash {key} must be string")
+                if val:
+                    if len(val) != 64 or not all(c in "0123456789abcdef" for c in val.lower()):
+                        raise ValueError(f"Device hash {key} must be empty or valid SHA-256 hexadecimal")
+                    non_empty_count += 1
+            if non_empty_count < 2:
+                raise ValueError("At least two device hash components are required")
         else:
             raise ValueError("Device hash must be string or dict")
         return v

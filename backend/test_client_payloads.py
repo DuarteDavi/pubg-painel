@@ -361,22 +361,6 @@ class TestVisionPayloads:
         )
         assert response.status_code == 422
 
-        # Invalid: empty value
-        response = test_client.post(
-            "/api/auth/verify",
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "device_hash": {
-                    "system_uuid_hash": "",
-                    "baseboard_serial_hash": hashlib.sha256("bios".encode()).hexdigest(),
-                    "machine_guid_hash": hashlib.sha256("guid".encode()).hexdigest(),
-                    "install_id_hash": hashlib.sha256("install".encode()).hexdigest(),
-                    "disk_serial_hash": hashlib.sha256("disk".encode()).hexdigest(),
-                }
-            },
-        )
-        assert response.status_code == 422
-
 
 class TestDeviceMismatchValidation:
     """Device binding prevents mismatched devices"""
@@ -633,3 +617,190 @@ class TestLogoutBothClients:
             json={"device_hash": device},
         )
         assert response.status_code == 401
+
+
+class TestVisionUnavailableComponents:
+    """Vision hardware may not provide all 5 components - test real scenarios"""
+
+    def test_vision_login_with_two_available_components(
+        self, test_client, admin_token, setup_dual_products, db
+    ):
+        """
+        Real Survival Vision machine:
+        - system_uuid_hash: unavailable (empty)
+        - baseboard_serial_hash: unavailable (empty)
+        - machine_guid_hash: available (valid SHA256)
+        - install_id_hash: available (valid SHA256)
+        - disk_serial_hash: unavailable (empty)
+        Login should succeed with 2 valid components.
+        """
+        from app.models import Client, License, ClientStatus, LicenseType
+        from app.auth import hash_password
+
+        client_obj = Client(
+            login="visionunavailable001",
+            password_hash=hash_password("VisionProdPass2026"),
+            status=ClientStatus.ACTIVE,
+        )
+        db.add(client_obj)
+        db.flush()
+
+        now = datetime.now(timezone.utc)
+        license_obj = License(
+            client_id=client_obj.id,
+            product_id=2,
+            license_type=LicenseType.TRIAL,
+            device_limit=1,
+            expires_at=now + timedelta(days=30),
+            is_active=True,
+        )
+        db.add(license_obj)
+        db.commit()
+
+        # Real Vision payload with 2 available, 3 empty
+        vision_device = {
+            "system_uuid_hash": "",  # unavailable
+            "baseboard_serial_hash": "",  # unavailable
+            "machine_guid_hash": hashlib.sha256(b"real_guid_prod").hexdigest(),
+            "install_id_hash": hashlib.sha256(b"install_prod_uuid").hexdigest(),
+            "disk_serial_hash": "",  # unavailable
+        }
+
+        response = test_client.post(
+            "/api/auth/login",
+            json={
+                "login": "visionunavailable001",
+                "password": "VisionProdPass2026",
+                "product": "survival_vision",
+                "device": vision_device,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "access_token" in data
+        assert "device_id" in data
+
+    def test_vision_verify_with_unavailable_components(
+        self, test_client, setup_dual_products, db
+    ):
+        """Verify with 2 available, 3 empty components should succeed"""
+        from app.models import Client, License, ClientStatus, LicenseType
+        from app.auth import hash_password, create_access_token, hash_token, hash_device
+
+        client_obj = Client(
+            login="visionverify_unavail",
+            password_hash=hash_password("VisionVerifyPass2026"),
+            status=ClientStatus.ACTIVE,
+        )
+        db.add(client_obj)
+        db.flush()
+
+        now = datetime.now(timezone.utc)
+        license_obj = License(
+            client_id=client_obj.id,
+            product_id=2,
+            license_type=LicenseType.TRIAL,
+            device_limit=1,
+            expires_at=now + timedelta(days=30),
+            is_active=True,
+        )
+        db.add(license_obj)
+
+        # Device with 2 valid, 3 empty
+        device = {
+            "system_uuid_hash": "",
+            "baseboard_serial_hash": "",
+            "machine_guid_hash": hashlib.sha256(b"verify_guid").hexdigest(),
+            "install_id_hash": hashlib.sha256(b"verify_install").hexdigest(),
+            "disk_serial_hash": "",
+        }
+
+        from app.models import ClientSession
+
+        token = create_access_token(
+            {"sub": "visionverify_unavail", "client_id": client_obj.id}
+        )
+        session = ClientSession(
+            client_id=client_obj.id,
+            token_hash=hash_token(token),
+            refresh_token_hash=hash_token("dummy"),
+            expires_at=now + timedelta(minutes=15),
+            refresh_expires_at=now + timedelta(days=7),
+            device_hash=hash_device(device),
+        )
+        db.add(session)
+        db.commit()
+
+        # Verify with same unavailable components
+        response = test_client.post(
+            "/api/auth/verify",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"device_hash": device},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid"] is True
+
+    def test_vision_less_than_two_components_rejected(self, test_client, setup_dual_products):
+        """Less than 2 valid components should be rejected with 422"""
+        from app.auth import create_access_token
+
+        # Create dummy token for bearer header
+        token = create_access_token({"sub": "test", "client_id": 1})
+
+        # Only 1 valid component
+        response = test_client.post(
+            "/api/auth/verify",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "device_hash": {
+                    "system_uuid_hash": "",
+                    "baseboard_serial_hash": "",
+                    "machine_guid_hash": hashlib.sha256(b"only_one").hexdigest(),
+                    "install_id_hash": "",
+                    "disk_serial_hash": "",
+                }
+            },
+        )
+        assert response.status_code == 422
+
+        # Zero valid components
+        response = test_client.post(
+            "/api/auth/verify",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "device_hash": {
+                    "system_uuid_hash": "",
+                    "baseboard_serial_hash": "",
+                    "machine_guid_hash": "",
+                    "install_id_hash": "",
+                    "disk_serial_hash": "",
+                }
+            },
+        )
+        assert response.status_code == 422
+
+    def test_vision_invalid_hash_with_empty_others_rejected(
+        self, test_client, setup_dual_products
+    ):
+        """Non-empty but invalid SHA256 should be rejected even if others are empty"""
+        from app.auth import create_access_token
+
+        token = create_access_token({"sub": "test", "client_id": 1})
+
+        # One invalid (not SHA256), one valid, rest empty
+        response = test_client.post(
+            "/api/auth/verify",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "device_hash": {
+                    "system_uuid_hash": "invalid_not_hex",  # Invalid SHA256
+                    "baseboard_serial_hash": "",
+                    "machine_guid_hash": hashlib.sha256(b"valid").hexdigest(),
+                    "install_id_hash": "",
+                    "disk_serial_hash": "",
+                }
+            },
+        )
+        assert response.status_code == 422
+
